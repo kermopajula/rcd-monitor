@@ -1,0 +1,24 @@
+{
+  "name": "pool-heater-monitor",
+  "version": "1.0.0",
+  "description": "Pings the pool heater and alerts via ntfy / Resend when it loses power",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "rimraf build && tsc -p tsconfig.json",
+    "start": "yarn build && node build/index.js",
+    "dev": "tsx watch src/index.ts",
+    "prod": "yarn build && (pm2 restart pool-heater 2>/dev/null || pm2 start build/index.js --name pool-heater) && pm2 save"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.13",
+    "prettier": "^3.5.3",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2"
+  }
+}
