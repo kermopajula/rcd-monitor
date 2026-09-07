@@ -2,28 +2,14 @@ import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { log } from './log.js'
 import { apiToken, port } from './config.js'
 import { notify } from './notify.js'
-import {
-  getPoolHeaterStatus,
-  mutePoolHeaterAlerts,
-  startPoolHeaterProbe,
-  unmutePoolHeaterAlerts,
-} from './poolHeater.js'
+import { getPoolHeaterStatus, startPoolHeaterProbe } from './poolHeater.js'
 
 /**
  * Tiny HTTP API (no framework):
  *   GET  /status        current probe state
- *   POST /mute          body {"hours": 8} or ?hours=8, omit for indefinite
- *   POST /unmute        re-enable alerts (checks immediately)
  *   POST /test          send a test notification through every configured channel
  * All requests need "Authorization: Bearer <apiToken>" when apiToken is set.
  */
-
-const readBody = (req: IncomingMessage) =>
-  new Promise<string>((resolve) => {
-    let body = ''
-    req.on('data', (chunk) => (body += chunk))
-    req.on('end', () => resolve(body))
-  })
 
 const json = (res: ServerResponse, status: number, data: unknown) => {
   res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -44,23 +30,6 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/status') {
       return json(res, 200, getPoolHeaterStatus())
-    }
-
-    if (req.method === 'POST' && url.pathname === '/mute') {
-      const body = await readBody(req)
-      let hours = Number(url.searchParams.get('hours'))
-      if (body) {
-        try {
-          hours = Number(JSON.parse(body).hours)
-        } catch {
-          return json(res, 400, { error: 'Body must be JSON like {"hours": 8}' })
-        }
-      }
-      return json(res, 200, mutePoolHeaterAlerts(hours > 0 ? hours : undefined))
-    }
-
-    if (req.method === 'POST' && url.pathname === '/unmute') {
-      return json(res, 200, unmutePoolHeaterAlerts())
     }
 
     if (req.method === 'POST' && url.pathname === '/test') {

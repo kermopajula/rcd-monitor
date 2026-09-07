@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { addHours, formatDistanceStrict, isAfter } from 'date-fns'
+import { formatDistanceStrict } from 'date-fns'
 import { formatDate, log } from './log.js'
 import { notify } from './notify.js'
 import { checkMinutes, failureThreshold, heaterIp, reminderMinutes } from './config.js'
@@ -9,9 +9,9 @@ import { checkMinutes, failureThreshold, heaterIp, reminderMinutes } from './con
  * Pool heater probe. The heater is on the local network and sits behind an RCD. When it stops
  * answering pings it has lost power, and because of the RCD it will stay off until someone
  * resets it, so we alert, remind every `reminderMinutes` while it stays down, and
- * notify once it is back. Alerts can be muted (optionally for a number of hours) when the
- * heater is powered off on purpose. State is persisted to a JSON file so restarts keep the
- * outage start time, reminder cadence and mute setting.
+ * notify once it is back. To silence it for an intentional shutdown just stop the process
+ * (pm2 stop pool-heater). State is persisted to a JSON file so restarts keep the outage start
+ * time and reminder cadence.
  */
 
 type Status = 'unknown' | 'up' | 'down'
@@ -25,9 +25,6 @@ interface State {
   downSince: Date | null
   lastError: string | null
   lastNotifiedAt: Date | null
-  muted: boolean
-  mutedAt: Date | null
-  mutedUntil: Date | null
 }
 
 const STATE_FILE = 'state.json'
@@ -38,8 +35,6 @@ const DATE_FIELDS: (keyof State)[] = [
   'failingSince',
   'downSince',
   'lastNotifiedAt',
-  'mutedAt',
-  'mutedUntil',
 ]
 
 const initialState = (): State => ({
@@ -51,9 +46,6 @@ const initialState = (): State => ({
   downSince: null,
   lastError: null,
   lastNotifiedAt: null,
-  muted: false,
-  mutedAt: null,
-  mutedUntil: null,
 })
 
 let state: State = initialState()
@@ -73,8 +65,7 @@ const loadState = () => {
     state = loaded
     log(
       `Pool heater state restored: ${state.status}` +
-        (state.downSince ? `, down since ${formatDate(state.downSince)}` : '') +
-        (state.muted ? ', alerts muted' : ''),
+        (state.downSince ? `, down since ${formatDate(state.downSince)}` : ''),
     )
   } catch (error: any) {
     log('Could not read pool heater state, starting fresh:', error.message)
@@ -99,25 +90,7 @@ const ping = () =>
 
 const downFor = (now: Date) => (state.downSince ? formatDistanceStrict(now, state.downSince) : '')
 
-/** Clears an expired timed mute. Returns whether alerts are currently muted. */
-const isMuted = (now: Date) => {
-  if (state.muted && state.mutedUntil && isAfter(now, state.mutedUntil)) {
-    log('Pool heater mute expired, alerts re-enabled')
-    state.muted = false
-    state.mutedAt = null
-    state.mutedUntil = null
-    saveState()
-  }
-
-  return state.muted
-}
-
 const sendAlert = async (now: Date, n: Parameters<typeof notify>[0]) => {
-  if (isMuted(now)) {
-    log(`Pool heater alert suppressed (muted): ${n.title}`)
-    return
-  }
-
   state.lastNotifiedAt = now
   saveState()
   await notify(n)
@@ -126,7 +99,6 @@ const sendAlert = async (now: Date, n: Parameters<typeof notify>[0]) => {
 const handleSuccess = async (now: Date) => {
   const previous = state.status
   const downSince = state.downSince
-  const wasMuted = state.muted
 
   state.status = 'up'
   state.consecutiveFailures = 0
@@ -138,24 +110,13 @@ const handleSuccess = async (now: Date) => {
   if (previous === 'down' && downSince) {
     const outage = formatDistanceStrict(now, downSince)
 
-    // A muted outage was intentional; it is over now, so alerts go back on automatically.
-    if (wasMuted) {
-      state.muted = false
-      state.mutedAt = null
-      state.mutedUntil = null
-      log('Pool heater is back, mute lifted automatically')
-    }
-
     log(`Pool heater is back online after ${outage}`)
     await notify({
       title: 'Pool heater is back online',
       message: [
         `The pool heater (${heaterIp}) is responding to pings again.`,
         `Offline since ${formatDate(downSince)}, back at ${formatDate(now)} (${outage}).`,
-        wasMuted ? 'Alerts were muted and are now re-enabled.' : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+      ].join('\n'),
       priority: 'default',
       tags: ['white_check_mark'],
     })
@@ -186,7 +147,7 @@ const handleFailure = async (now: Date, error: any) => {
       message: [
         `The pool heater (${heaterIp}) has been down for ${downFor(now)}.`,
         `Offline since ${formatDate(state.downSince!)}, ${state.consecutiveFailures} failed checks.`,
-        'Reset the RCD to restore power, or mute alerts if this is intentional.',
+        'Reset the RCD to restore power (or pm2 stop pool-heater if this is intentional).',
       ].join('\n'),
       priority: 'high',
       tags: ['warning', 'electric_plug'],
@@ -217,7 +178,7 @@ const handleFailure = async (now: Date, error: any) => {
         ? `Last seen ${formatDate(state.lastSeen)}.`
         : 'Never seen online since start.',
       'The RCD has probably tripped, so it will stay off until reset.',
-      `Reminders every ${reminderMinutes} min until it is back or alerts are muted.`,
+      `Reminders every ${reminderMinutes} min until it is back.`,
       `Error: ${state.lastError}`,
     ].join('\n'),
     priority: 'high',
@@ -262,34 +223,6 @@ export const stopPoolHeaterProbe = () => {
   timer = null
 }
 
-/** Mutes alerts, indefinitely or for `hours`. Checks keep running so status stays current. */
-export const mutePoolHeaterAlerts = (hours?: number) => {
-  const now = new Date()
-  state.muted = true
-  state.mutedAt = now
-  state.mutedUntil = hours && hours > 0 ? addHours(now, hours) : null
-  saveState()
-  log(
-    `Pool heater alerts muted` +
-      (state.mutedUntil ? ` until ${formatDate(state.mutedUntil)}` : ' until unmuted'),
-  )
-
-  return getPoolHeaterStatus()
-}
-
-/** Re-enables alerts. If the heater is currently down, an alert goes out on the next check. */
-export const unmutePoolHeaterAlerts = () => {
-  state.muted = false
-  state.mutedAt = null
-  state.mutedUntil = null
-  state.lastNotifiedAt = null
-  saveState()
-  log('Pool heater alerts unmuted')
-  void checkPoolHeater()
-
-  return getPoolHeaterStatus()
-}
-
 export const getPoolHeaterStatus = () => {
   if (!heaterIp) return null
 
@@ -304,8 +237,5 @@ export const getPoolHeaterStatus = () => {
     downFor: state.status === 'down' ? downFor(now) : null,
     lastError: state.lastError,
     lastNotifiedAt: state.lastNotifiedAt,
-    muted: isMuted(now),
-    mutedAt: state.mutedAt,
-    mutedUntil: state.mutedUntil,
   }
 }
