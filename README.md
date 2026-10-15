@@ -11,9 +11,9 @@ Runs on the Raspberry Pi under pm2 alongside other services.
 ## Setup
 
 ```bash
-yarn
+pnpm install
 cp .env.example .env   # fill in deviceIp, deviceName and at least one notification channel
-yarn prod              # build, (re)start under pm2 as "rcd-monitor", pm2 save
+pnpm prod              # build, (re)start under pm2 as "rcd-monitor", pm2 save
 ```
 
 Give the device a DHCP reservation in the router so `deviceIp` never changes, and check from the Pi
@@ -23,7 +23,7 @@ that it answers pings at all:
 ping -c 3 192.168.1.50
 ```
 
-For development: `yarn dev` (tsx watch).
+For development: `pnpm dev` (tsx watch).
 
 ## How it works
 
