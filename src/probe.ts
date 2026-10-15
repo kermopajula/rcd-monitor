@@ -3,10 +3,10 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { formatDistanceStrict } from 'date-fns'
 import { formatDate, log } from './log.js'
 import { notify } from './notify.js'
-import { checkMinutes, failureThreshold, heaterIp, reminderMinutes } from './config.js'
+import { checkMinutes, deviceIp, deviceName, failureThreshold, reminderMinutes } from './config.js'
 
 /**
- * Pool heater probe. The heater is on the local network and sits behind an RCD. When it stops
+ * Device probe. The monitored device is on the local network and sits behind an RCD. When it stops
  * answering pings it has lost power, and because of the RCD it will stay off until someone
  * resets it, so we alert, remind every `reminderMinutes` while it stays down, and
  * notify once it is back. To silence it for an intentional shutdown just stop the process
@@ -64,11 +64,11 @@ const loadState = () => {
     }
     state = loaded
     log(
-      `Pool heater state restored: ${state.status}` +
+      `State restored: ${state.status}` +
         (state.downSince ? `, down since ${formatDate(state.downSince)}` : ''),
     )
   } catch (error: any) {
-    log('Could not read pool heater state, starting fresh:', error.message)
+    log('Could not read state, starting fresh:', error.message)
   }
 }
 
@@ -76,13 +76,13 @@ const saveState = () => {
   try {
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
   } catch (error: any) {
-    log('Could not persist pool heater state:', error.message)
+    log('Could not persist state:', error.message)
   }
 }
 
 const ping = () =>
   new Promise<void>((resolve, reject) => {
-    execFile('ping', ['-c', '1', heaterIp!], { timeout: PING_TIMEOUT_MS }, (error, _out, err) => {
+    execFile('ping', ['-c', '1', deviceIp!], { timeout: PING_TIMEOUT_MS }, (error, _out, err) => {
       if (error) reject(new Error(err?.trim() || error.message))
       else resolve()
     })
@@ -110,11 +110,11 @@ const handleSuccess = async (now: Date) => {
   if (previous === 'down' && downSince) {
     const outage = formatDistanceStrict(now, downSince)
 
-    log(`Pool heater is back online after ${outage}`)
+    log(`${deviceName} is back online after ${outage}`)
     await notify({
-      title: 'Pool heater is back online',
+      title: `${deviceName} is back online`,
       message: [
-        `The pool heater (${heaterIp}) is responding to pings again.`,
+        `${deviceName} (${deviceIp}) is responding to pings again.`,
         `Offline since ${formatDate(downSince)}, back at ${formatDate(now)} (${outage}).`,
       ].join('\n'),
       priority: 'default',
@@ -122,7 +122,7 @@ const handleSuccess = async (now: Date) => {
     })
     state.lastNotifiedAt = now
   } else if (previous === 'unknown') {
-    log(`Pool heater is online (${heaterIp})`)
+    log(`${deviceName} is online (${deviceIp})`)
   }
 
   saveState()
@@ -141,11 +141,11 @@ const handleFailure = async (now: Date, error: any) => {
     saveState()
     if (!reminderDue) return
 
-    log(`Pool heater still OFFLINE, down for ${downFor(now)}`)
+    log(`${deviceName} still OFFLINE, down for ${downFor(now)}`)
     await sendAlert(now, {
-      title: `Pool heater still OFFLINE (${downFor(now)})`,
+      title: `${deviceName} still OFFLINE (${downFor(now)})`,
       message: [
-        `The pool heater (${heaterIp}) has been down for ${downFor(now)}.`,
+        `${deviceName} (${deviceIp}) has been down for ${downFor(now)}.`,
         `Offline since ${formatDate(state.downSince!)}, ${state.consecutiveFailures} failed checks.`,
         'Reset the RCD to restore power (or pm2 stop rcd-monitor if this is intentional).',
       ].join('\n'),
@@ -157,7 +157,7 @@ const handleFailure = async (now: Date, error: any) => {
 
   if (state.consecutiveFailures < failureThreshold) {
     log(
-      `Pool heater check failed (${state.consecutiveFailures}/${failureThreshold}):`,
+      `${deviceName} check failed (${state.consecutiveFailures}/${failureThreshold}):`,
       state.lastError,
     )
     saveState()
@@ -168,11 +168,11 @@ const handleFailure = async (now: Date, error: any) => {
   state.downSince = state.failingSince
   saveState()
 
-  log(`Pool heater is OFFLINE since ${formatDate(state.downSince!)}:`, state.lastError)
+  log(`${deviceName} is OFFLINE since ${formatDate(state.downSince!)}:`, state.lastError)
   await sendAlert(now, {
-    title: 'Pool heater is OFFLINE',
+    title: `${deviceName} is OFFLINE`,
     message: [
-      `The pool heater (${heaterIp}) stopped responding to pings.`,
+      `${deviceName} (${deviceIp}) stopped responding to pings.`,
       `Failing since ${formatDate(state.downSince!)}, ${state.consecutiveFailures} checks in a row.`,
       state.lastSeen
         ? `Last seen ${formatDate(state.lastSeen)}.`
@@ -186,7 +186,7 @@ const handleFailure = async (now: Date, error: any) => {
   })
 }
 
-export const checkPoolHeater = async () => {
+export const checkDevice = async () => {
   if (inFlight) return
   inFlight = true
   const now = new Date()
@@ -202,33 +202,34 @@ export const checkPoolHeater = async () => {
   }
 }
 
-export const startPoolHeaterProbe = () => {
-  if (!heaterIp) {
-    log('Pool heater probe disabled (heaterIp not set)')
+export const startProbe = () => {
+  if (!deviceIp) {
+    log('Probe disabled (deviceIp not set)')
     return
   }
 
   loadState()
   log(
-    `Pool heater probe started, pinging ${heaterIp} every ${checkMinutes} min,`,
+    `Probe started, pinging ${deviceIp} every ${checkMinutes} min,`,
     `alert after ${failureThreshold} failures, remind every ${reminderMinutes} min`,
   )
 
-  void checkPoolHeater()
-  timer = setInterval(checkPoolHeater, checkMinutes * 60 * 1000)
+  void checkDevice()
+  timer = setInterval(checkDevice, checkMinutes * 60 * 1000)
 }
 
-export const stopPoolHeaterProbe = () => {
+export const stopProbe = () => {
   if (timer) clearInterval(timer)
   timer = null
 }
 
-export const getPoolHeaterStatus = () => {
-  if (!heaterIp) return null
+export const getStatus = () => {
+  if (!deviceIp) return null
 
   const now = new Date()
   return {
-    ip: heaterIp,
+    name: deviceName,
+    ip: deviceIp,
     status: state.status,
     consecutiveFailures: state.consecutiveFailures,
     lastChecked: state.lastChecked,

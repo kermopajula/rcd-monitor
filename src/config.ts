@@ -6,7 +6,8 @@ const num = (name: string, fallback: number) => {
   return process.env[name] && Number.isFinite(value) ? value : fallback
 }
 
-export const heaterIp = str('heaterIp')
+export const deviceIp = str('deviceIp')
+export const deviceName = str('deviceName') || 'Device'
 export const checkMinutes = num('checkMinutes', 5)
 export const failureThreshold = num('failureThreshold', 2)
 export const reminderMinutes = num('reminderMinutes', 60)

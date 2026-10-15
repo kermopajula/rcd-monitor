@@ -2,7 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { log } from './log.js'
 import { apiToken, port } from './config.js'
 import { notify } from './notify.js'
-import { getPoolHeaterStatus, startPoolHeaterProbe } from './poolHeater.js'
+import { getStatus, startProbe } from './probe.js'
 
 /**
  * Tiny HTTP API (no framework):
@@ -29,7 +29,7 @@ const server = createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && url.pathname === '/status') {
-      return json(res, 200, getPoolHeaterStatus())
+      return json(res, 200, getStatus())
     }
 
     if (req.method === 'POST' && url.pathname === '/test') {
@@ -49,10 +49,8 @@ const server = createServer(async (req, res) => {
 })
 
 server.listen(port, () => {
-  log(
-    `RCD monitor listening on port ${port}${apiToken ? '' : ' (no apiToken set, API is open)'}`,
-  )
-  startPoolHeaterProbe()
+  log(`RCD monitor listening on port ${port}${apiToken ? '' : ' (no apiToken set, API is open)'}`)
+  startProbe()
 })
 
 const shutdown = () => {

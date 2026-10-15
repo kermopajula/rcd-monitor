@@ -1,7 +1,7 @@
 {
   "name": "rcd-monitor",
   "version": "1.0.0",
-  "description": "Pings the pool heater and alerts via ntfy / Resend when it loses power",
+  "description": "Pings a device behind an RCD and alerts via ntfy / Resend when it loses power",
   "type": "module",
   "private": true,
   "scripts": {
