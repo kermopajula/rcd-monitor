@@ -1,10 +1,10 @@
-# Pool heater monitor
+# RCD monitor
 
 Pings the pool heater on the local network and alerts via [ntfy](https://ntfy.sh) push
 notifications and/or email via [Resend](https://resend.com) when it stops responding. The heater sits
 behind an RCD, so once it loses power it stays off until someone resets it: the monitor alerts,
 reminds every hour while it stays down, and confirms when it is back. To silence it during an
-intentional shutdown, stop the process (`pm2 stop pool-heater`) and start it again afterwards.
+intentional shutdown, stop the process (`pm2 stop rcd-monitor`) and start it again afterwards.
 
 Runs on the Raspberry Pi under pm2 alongside other services.
 
@@ -13,7 +13,7 @@ Runs on the Raspberry Pi under pm2 alongside other services.
 ```bash
 yarn
 cp .env.example .env   # fill in heaterIp and at least one notification channel
-yarn prod              # build, (re)start under pm2 as "pool-heater", pm2 save
+yarn prod              # build, (re)start under pm2 as "rcd-monitor", pm2 save
 ```
 
 Give the heater a DHCP reservation in the router so `heaterIp` never changes, and check from the Pi

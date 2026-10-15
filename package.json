@@ -1,5 +1,5 @@
 {
-  "name": "pool-heater-monitor",
+  "name": "rcd-monitor",
   "version": "1.0.0",
   "description": "Pings the pool heater and alerts via ntfy / Resend when it loses power",
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "rimraf build && tsc -p tsconfig.json",
     "start": "yarn build && node build/index.js",
     "dev": "tsx watch src/index.ts",
-    "prod": "yarn build && (pm2 restart pool-heater 2>/dev/null || pm2 start build/index.js --name pool-heater) && pm2 save"
+    "prod": "yarn build && (pm2 restart rcd-monitor 2>/dev/null || pm2 start build/index.js --name rcd-monitor) && pm2 save"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

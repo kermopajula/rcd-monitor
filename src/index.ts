@@ -34,7 +34,7 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/test') {
       const result = await notify({
-        title: 'Pool heater monitor test',
+        title: 'RCD monitor test',
         message: `Test notification sent at ${new Date().toISOString()}`,
         tags: ['bell'],
       })
@@ -50,7 +50,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, () => {
   log(
-    `Pool heater monitor listening on port ${port}${apiToken ? '' : ' (no apiToken set, API is open)'}`,
+    `RCD monitor listening on port ${port}${apiToken ? '' : ' (no apiToken set, API is open)'}`,
   )
   startPoolHeaterProbe()
 })

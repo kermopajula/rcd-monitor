@@ -10,7 +10,7 @@ import { checkMinutes, failureThreshold, heaterIp, reminderMinutes } from './con
  * answering pings it has lost power, and because of the RCD it will stay off until someone
  * resets it, so we alert, remind every `reminderMinutes` while it stays down, and
  * notify once it is back. To silence it for an intentional shutdown just stop the process
- * (pm2 stop pool-heater). State is persisted to a JSON file so restarts keep the outage start
+ * (pm2 stop rcd-monitor). State is persisted to a JSON file so restarts keep the outage start
  * time and reminder cadence.
  */
 
@@ -147,7 +147,7 @@ const handleFailure = async (now: Date, error: any) => {
       message: [
         `The pool heater (${heaterIp}) has been down for ${downFor(now)}.`,
         `Offline since ${formatDate(state.downSince!)}, ${state.consecutiveFailures} failed checks.`,
-        'Reset the RCD to restore power (or pm2 stop pool-heater if this is intentional).',
+        'Reset the RCD to restore power (or pm2 stop rcd-monitor if this is intentional).',
       ].join('\n'),
       priority: 'high',
       tags: ['warning', 'electric_plug'],
