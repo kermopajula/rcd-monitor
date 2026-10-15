@@ -2,11 +2,14 @@ import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { log } from './log.js'
 import { apiToken, port } from './config.js'
 import { notify } from './notify.js'
-import { getStatus, startProbe } from './probe.js'
+import { parseDuration } from './duration.js'
+import { getStatus, pause, resume, startProbe } from './probe.js'
 
 /**
  * Tiny HTTP API (no framework):
  *   GET  /status        current probe state
+ *   POST /pause?for=8h  pause alerts for 30m / 8h / 2d (checks keep running)
+ *   POST /resume        lift a pause early and check right away
  *   POST /test          send a test notification through every configured channel
  * All requests need "Authorization: Bearer <apiToken>" when apiToken is set.
  */
@@ -30,6 +33,16 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/status') {
       return json(res, 200, getStatus())
+    }
+
+    if (req.method === 'POST' && url.pathname === '/pause') {
+      const ms = parseDuration(url.searchParams.get('for'))
+      if (!ms) return json(res, 400, { error: 'Give a duration like ?for=30m, ?for=8h or ?for=2d' })
+      return json(res, 200, await pause(ms))
+    }
+
+    if (req.method === 'POST' && url.pathname === '/resume') {
+      return json(res, 200, await resume())
     }
 
     if (req.method === 'POST' && url.pathname === '/test') {

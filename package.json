@@ -9,7 +9,10 @@
     "build": "rimraf build && tsc -p tsconfig.json",
     "start": "pnpm build && node build/index.js",
     "dev": "tsx watch src/index.ts",
-    "prod": "pnpm build && (pm2 restart rcd-monitor 2>/dev/null || pm2 start build/index.js --name rcd-monitor) && pm2 save"
+    "prod": "pnpm build && (pm2 restart rcd-monitor 2>/dev/null || pm2 start build/index.js --name rcd-monitor) && pm2 save",
+    "status": "node build/cli.js status",
+    "pause": "node build/cli.js pause",
+    "resume": "node build/cli.js resume"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

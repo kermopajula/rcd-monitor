@@ -9,9 +9,11 @@ import { checkMinutes, deviceIp, deviceName, failureThreshold, reminderMinutes }
  * Device probe. The monitored device is on the local network and sits behind an RCD. When it stops
  * answering pings it has lost power, and because of the RCD it will stay off until someone
  * resets it, so we alert, remind every `reminderMinutes` while it stays down, and
- * notify once it is back. To silence it for an intentional shutdown just stop the process
- * (pm2 stop rcd-monitor). State is persisted to a JSON file so restarts keep the outage start
- * time and reminder cadence.
+ * notify once it is back. For an intentional shutdown, alerts can be paused for a set time:
+ * checks keep running so status stays current, and once the pause ends (or is lifted with
+ * resume) alerting picks up from the current state, so an outage that is still ongoing is
+ * reported right away. State is persisted to a JSON file so restarts keep the outage start
+ * time, reminder cadence and pause.
  */
 
 type Status = 'unknown' | 'up' | 'down'
@@ -25,6 +27,7 @@ interface State {
   downSince: Date | null
   lastError: string | null
   lastNotifiedAt: Date | null
+  pausedUntil: Date | null
 }
 
 const STATE_FILE = 'state.json'
@@ -35,6 +38,7 @@ const DATE_FIELDS: (keyof State)[] = [
   'failingSince',
   'downSince',
   'lastNotifiedAt',
+  'pausedUntil',
 ]
 
 const initialState = (): State => ({
@@ -46,6 +50,7 @@ const initialState = (): State => ({
   downSince: null,
   lastError: null,
   lastNotifiedAt: null,
+  pausedUntil: null,
 })
 
 let state: State = initialState()
@@ -65,7 +70,8 @@ const loadState = () => {
     state = loaded
     log(
       `State restored: ${state.status}` +
-        (state.downSince ? `, down since ${formatDate(state.downSince)}` : ''),
+        (state.downSince ? `, down since ${formatDate(state.downSince)}` : '') +
+        (state.pausedUntil ? `, paused until ${formatDate(state.pausedUntil)}` : ''),
     )
   } catch (error: any) {
     log('Could not read state, starting fresh:', error.message)
@@ -90,7 +96,34 @@ const ping = () =>
 
 const downFor = (now: Date) => (state.downSince ? formatDistanceStrict(now, state.downSince) : '')
 
+const isPaused = (now: Date) => !!state.pausedUntil && now < state.pausedUntil
+
+const statusLine = () =>
+  state.status === 'down'
+    ? `${deviceName} is currently OFFLINE (down for ${downFor(new Date())}).`
+    : `${deviceName} is currently ${state.status === 'up' ? 'online' : 'not checked yet'}.`
+
+/** Lifts the pause. Alerts for an ongoing outage go out on the next failed check. */
+const endPause = async (reason: string) => {
+  state.pausedUntil = null
+  state.lastNotifiedAt = null
+  saveState()
+
+  log(`${reason}, alerts resumed`)
+  await notify({
+    title: `${deviceName} monitoring resumed`,
+    message: [`${reason}.`, statusLine()].join('\n'),
+    priority: 'low',
+    tags: ['arrow_forward'],
+  })
+}
+
 const sendAlert = async (now: Date, n: Parameters<typeof notify>[0]) => {
+  if (isPaused(now)) {
+    log(`Alert suppressed (paused until ${formatDate(state.pausedUntil!)}): ${n.title}`)
+    return
+  }
+
   state.lastNotifiedAt = now
   saveState()
   await notify(n)
@@ -111,7 +144,7 @@ const handleSuccess = async (now: Date) => {
     const outage = formatDistanceStrict(now, downSince)
 
     log(`${deviceName} is back online after ${outage}`)
-    await notify({
+    await sendAlert(now, {
       title: `${deviceName} is back online`,
       message: [
         `${deviceName} (${deviceIp}) is responding to pings again.`,
@@ -120,7 +153,6 @@ const handleSuccess = async (now: Date) => {
       priority: 'default',
       tags: ['white_check_mark'],
     })
-    state.lastNotifiedAt = now
   } else if (previous === 'unknown') {
     log(`${deviceName} is online (${deviceIp})`)
   }
@@ -139,7 +171,7 @@ const handleFailure = async (now: Date, error: any) => {
       now.getTime() - state.lastNotifiedAt.getTime() >= reminderMinutes * 60 * 1000
 
     saveState()
-    if (!reminderDue) return
+    if (!reminderDue || isPaused(now)) return
 
     log(`${deviceName} still OFFLINE, down for ${downFor(now)}`)
     await sendAlert(now, {
@@ -147,7 +179,7 @@ const handleFailure = async (now: Date, error: any) => {
       message: [
         `${deviceName} (${deviceIp}) has been down for ${downFor(now)}.`,
         `Offline since ${formatDate(state.downSince!)}, ${state.consecutiveFailures} failed checks.`,
-        'Reset the RCD to restore power (or pm2 stop rcd-monitor if this is intentional).',
+        'Reset the RCD to restore power, or pause alerts if this is intentional.',
       ].join('\n'),
       priority: 'high',
       tags: ['warning', 'electric_plug'],
@@ -193,6 +225,8 @@ export const checkDevice = async () => {
   state.lastChecked = now
 
   try {
+    if (state.pausedUntil && !isPaused(now)) await endPause('Pause ended')
+
     await ping()
     await handleSuccess(now)
   } catch (error) {
@@ -223,6 +257,33 @@ export const stopProbe = () => {
   timer = null
 }
 
+/** Pauses alerts for `ms` milliseconds. Checks keep running so status stays current. */
+export const pause = async (ms: number) => {
+  state.pausedUntil = new Date(Date.now() + ms)
+  saveState()
+
+  const until = formatDate(state.pausedUntil)
+  log(`Alerts paused until ${until}`)
+  await notify({
+    title: `${deviceName} monitoring paused`,
+    message: [`No alerts until ${until}.`, statusLine()].join('\n'),
+    priority: 'low',
+    tags: ['pause_button'],
+  })
+
+  return getStatus()
+}
+
+/** Lifts a pause early and checks right away. */
+export const resume = async () => {
+  if (state.pausedUntil) {
+    await endPause('Resumed manually')
+    await checkDevice()
+  }
+
+  return getStatus()
+}
+
 export const getStatus = () => {
   if (!deviceIp) return null
 
@@ -238,5 +299,6 @@ export const getStatus = () => {
     downFor: state.status === 'down' ? downFor(now) : null,
     lastError: state.lastError,
     lastNotifiedAt: state.lastNotifiedAt,
+    pausedUntil: isPaused(now) ? state.pausedUntil : null,
   }
 }
